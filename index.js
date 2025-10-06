@@ -8,6 +8,7 @@ const { getVariables, defaultVariables } = require('./variables')
 const getPresets = require('./presets')
 const crypto = require('crypto')
 const http = require('http')
+const net = require('net')
 
 
 
@@ -35,6 +36,12 @@ class mCamInstance extends InstanceBase {
 		this.connTimer = undefined
 		this.error = false
 		this.requestTimeout = 1000
+		
+		// TCP/VISCA support for CV605
+		this.tcpSocket = null
+		this.tcpConnected = false
+		this.viscaCommandQueue = []
+		this.viscaResponseTimeout = 5000
 
 		this.iFrameMapping = {
 			stream1: {
@@ -209,6 +216,13 @@ class mCamInstance extends InstanceBase {
 			clearInterval(this.pollTimer)
 			delete this.pollTimer
 		}
+		
+		// Close TCP connection for CV605
+		if (this.tcpSocket) {
+			this.tcpSocket.destroy()
+			this.tcpSocket = null
+			this.tcpConnected = false
+		}
 	}
 
 	async init(config) {
@@ -230,9 +244,18 @@ class mCamInstance extends InstanceBase {
 		this.initPresets()
 
 		console.log('debug', 'Try to connect...')
-		this.connTimer = setInterval(() => {
-			this.init_api()
-		}, 1000)
+		
+		// Check if this is a CV605 camera (use TCP/VISCA)
+		if (this.config.cameraModel === 'CV605') {
+			this.connTimer = setInterval(() => {
+				this.init_tcp_connection()
+			}, 1000)
+		} else {
+			// Use existing HTTP connection for other Marshall cameras
+			this.connTimer = setInterval(() => {
+				this.init_api()
+			}, 1000)
+		}
 	}
 
 	async init_api() {
@@ -254,10 +277,59 @@ class mCamInstance extends InstanceBase {
 		}
 	}
 
+	async init_tcp_connection() {
+		if (this.tcpConnected) {
+			return
+		}
+
+		try {
+			this.tcpSocket = new net.Socket()
+			
+			this.tcpSocket.on('connect', () => {
+				console.log('debug', 'TCP connection to CV605 established')
+				this.tcpConnected = true
+				if (this.connTimer !== undefined) {
+					clearInterval(this.connTimer)
+					delete this.connTimer
+				}
+				this.updateStatus('ok')
+				this.initCommunication()
+			})
+
+			this.tcpSocket.on('data', (data) => {
+				this.handleViscaResponse(data)
+			})
+
+			this.tcpSocket.on('error', (err) => {
+				console.log('error', 'TCP connection error:', err.message)
+				this.tcpConnected = false
+				this.updateStatus('connection_error')
+			})
+
+			this.tcpSocket.on('close', () => {
+				console.log('debug', 'TCP connection closed')
+				this.tcpConnected = false
+				this.updateStatus('disconnected')
+			})
+
+			// Connect to CV605 on port 1259
+			this.tcpSocket.connect(this.config.tcpPort || 1259, this.config.host)
+			
+		} catch (err) {
+			console.log('error', 'Failed to create TCP connection:', err.message)
+			this.updateStatus('connection_error')
+		}
+	}
+
 	initCommunication() {
 		if (this.communicationInitiated !== true) {
-			this.initPolling()
-			this.updateStatus('ok')
+			if (this.config.cameraModel === 'CV605') {
+				// For CV605, we don't need polling as VISCA is command-based
+				this.updateStatus('ok')
+			} else {
+				this.initPolling()
+				this.updateStatus('ok')
+			}
 
 			this.communicationInitiated = true
 
@@ -782,6 +854,219 @@ class mCamInstance extends InstanceBase {
 		return data
 	}
 
+	// VISCA Protocol Methods for CV605
+	sendViscaCommand(command) {
+		if (!this.tcpConnected || !this.tcpSocket) {
+			console.log('error', 'TCP not connected, cannot send VISCA command')
+			return Promise.reject(new Error('TCP not connected'))
+		}
+
+		return new Promise((resolve, reject) => {
+			const commandBuffer = Buffer.from(command)
+			this.tcpSocket.write(commandBuffer, (err) => {
+				if (err) {
+					reject(err)
+				} else {
+					// Set up response timeout
+					const timeout = setTimeout(() => {
+						reject(new Error('VISCA command timeout'))
+					}, this.viscaResponseTimeout)
+					
+					// Store the promise resolve/reject for when we get a response
+					this.viscaCommandQueue.push({ resolve, reject, timeout })
+				}
+			})
+		})
+	}
+
+	handleViscaResponse(data) {
+		const response = Array.from(data).map(byte => byte.toString(16).padStart(2, '0')).join(' ')
+		console.log('debug', 'VISCA Response:', response)
+		
+		// Check for ACK (90 4y FF) or Completion (90 5y FF)
+		if (data.length >= 3 && data[0] === 0x90) {
+			if (data[2] === 0xFF) {
+				const command = this.viscaCommandQueue.shift()
+				if (command) {
+					clearTimeout(command.timeout)
+					if (data[1] === 0x50) { // Completion
+						command.resolve({ status: 'completed', response: response })
+					} else if (data[1] === 0x40) { // ACK
+						command.resolve({ status: 'ack', response: response })
+					} else {
+						command.resolve({ status: 'response', response: response })
+					}
+				}
+			}
+		}
+	}
+
+	// VISCA Command Builders
+	buildViscaCommand(command, params = []) {
+		// VISCA commands start with 81 (camera address 1)
+		let cmd = [0x81]
+		cmd = cmd.concat(command)
+		cmd = cmd.concat(params)
+		cmd.push(0xFF) // End of command
+		return cmd
+	}
+
+	// Camera Control Commands
+	async viscaPanTiltUp(speed = 0x18) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x06, 0x01], [speed, speed, 0x03, 0x01]))
+	}
+
+	async viscaPanTiltDown(speed = 0x18) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x06, 0x01], [speed, speed, 0x03, 0x02]))
+	}
+
+	async viscaPanTiltLeft(speed = 0x18) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x06, 0x01], [speed, speed, 0x01, 0x03]))
+	}
+
+	async viscaPanTiltRight(speed = 0x18) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x06, 0x01], [speed, speed, 0x02, 0x03]))
+	}
+
+	async viscaPanTiltStop() {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x06, 0x01], [0x00, 0x00, 0x03, 0x03]))
+	}
+
+	async viscaZoomIn(speed = 0x07) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x07], [0x20 + speed]))
+	}
+
+	async viscaZoomOut(speed = 0x07) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x07], [0x30 + speed]))
+	}
+
+	async viscaZoomStop() {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x07], [0x00]))
+	}
+
+	async viscaFocusFar(speed = 0x07) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x08], [0x20 + speed]))
+	}
+
+	async viscaFocusNear(speed = 0x07) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x08], [0x30 + speed]))
+	}
+
+	async viscaFocusStop() {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x08], [0x00]))
+	}
+
+	async viscaPresetCall(preset) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x3F], [0x02, preset]))
+	}
+
+	async viscaPresetSet(preset) {
+		return this.sendViscaCommand(this.buildViscaCommand([0x01, 0x04, 0x3F], [0x01, preset]))
+	}
+
+	// Modified makeRequest to handle both HTTP and VISCA
+	async makeRequest(endpoint, parameters = []) {
+		// If this is a CV605 camera, use VISCA commands
+		if (this.config.cameraModel === 'CV605') {
+			return this.handleViscaRequest(endpoint, parameters)
+		}
+		
+		// Otherwise use existing HTTP method
+		return this.makeHttpRequest(endpoint, parameters)
+	}
+
+	async handleViscaRequest(endpoint, parameters) {
+		// Map HTTP endpoints to VISCA commands
+		const [command, value] = parameters[0] || []
+		
+		try {
+			switch (command) {
+				case 'PanTiltUp':
+					return await this.viscaPanTiltUp()
+				case 'PanTiltDown':
+					return await this.viscaPanTiltDown()
+				case 'PanTiltLeft':
+					return await this.viscaPanTiltLeft()
+				case 'PanTiltRight':
+					return await this.viscaPanTiltRight()
+				case 'PanTiltStop':
+					return await this.viscaPanTiltStop()
+				case 'ZoomIn':
+					return await this.viscaZoomIn()
+				case 'ZoomOut':
+					return await this.viscaZoomOut()
+				case 'ZoomStop':
+					return await this.viscaZoomStop()
+				case 'FocusFar':
+					return await this.viscaFocusFar()
+				case 'FocusNear':
+					return await this.viscaFocusNear()
+				case 'FocusStop':
+					return await this.viscaFocusStop()
+				case 'PresetCall':
+					return await this.viscaPresetCall(value)
+				case 'PresetSet':
+					return await this.viscaPresetSet(value)
+				default:
+					console.log('debug', 'Unknown VISCA command:', command)
+					return { status: 200, data: {} }
+			}
+		} catch (err) {
+			console.log('error', 'VISCA command failed:', err.message)
+			return { status: 500, data: { error: err.message } }
+		}
+	}
+
+	// Rename the existing makeRequest to makeHttpRequest
+	async makeHttpRequest(endpoint, parameters = []) {
+		let uri = `/command/${endpoint}.cgi?`
+
+		let restarts = []
+		parameters.forEach(([key, value]) => { // adding parameters to uri
+			if (Object.keys(this.restarts).includes(key)) { // checking for restart events
+				restarts.push(this.restarts[key])
+			}
+			uri += `${key}=${value}&`
+		})
+		uri = uri.slice(0,-1) // finalize uri
+
+		if (restarts.length > 0) { // set start of restart event feedback
+			for (let event of restarts) {
+				if (this.data.restartEvents[event]) { // block actions if internal restarts happen
+					return this.returRequest({
+						status: 0,
+						headers: {},
+						data: {
+							error: {
+								type: `blocked by event "${event}"`,
+								url: 'http://' + this.config.host + uri
+							}
+						}
+					}, restarts)
+				}
+			}
+			restarts.forEach((event) => {
+				if (!this.data.restartEvents[event]) {
+					this.data.restartEvents[event] = true
+				}
+			})
+		}
+		if (this.data.restartEvents.camera) { // change instance status when whole device is restarting
+			this.updateStatus('camera restarting...')
+		}
+
+		const auth_req = await this.requestData('http://' + this.config.host + '/command/user.cgi') // request authentication data
+		
+		if (!auth_req.headers['www-authenticate']) { // return auth request if not successful
+			return this.returRequest(auth_req, restarts)
+		}
+
+		const auth_data = this.createAuth(this.getAuth(auth_req.headers['www-authenticate']), uri) // create authentication string
+		const data_req = await this.requestData('http://' + this.config.host + uri, auth_data, (endpoint == 'inquiry') ? true : false, (restarts.length == 0) ? true : false) // request data
+
+		return this.returRequest(data_req, restarts)
+	}
+
 	getConfigFields() {
 		return [
 			{
@@ -790,6 +1075,22 @@ class mCamInstance extends InstanceBase {
 				width: 12,
 				label: 'Information',
 				value: 'This module will connect to Marshall IP-Cameras',
+			},
+			{
+				type: 'dropdown',
+				id: 'cameraModel',
+				label: 'Camera Model',
+				width: 6,
+				default: 'CV730',
+				choices: [
+					{ id: 'CV355', label: 'CV355' },
+					{ id: 'CV420', label: 'CV420' },
+					{ id: 'CV420e', label: 'CV420e' },
+					{ id: 'CV620', label: 'CV620' },
+					{ id: 'CV630', label: 'CV630' },
+					{ id: 'CV730', label: 'CV730' },
+					{ id: 'CV605', label: 'CV605 (VISCA over TCP)' }
+				]
 			},
 			{
 				type: 'textinput',
@@ -801,12 +1102,23 @@ class mCamInstance extends InstanceBase {
 			},
 			{
 				type: 'number',
+				id: 'tcpPort',
+				label: 'TCP Port (for CV605)',
+				width: 3,
+				default: 1259,
+				min: 1,
+				max: 65535,
+				isVisible: (options) => options.cameraModel === 'CV605'
+			},
+			{
+				type: 'number',
 				id: 'pollInterval',
 				label: 'Polling Interval (ms), set to 0 to disable polling',
 				min: 50,
 				max: 1000,
 				default: 200,
 				width: 3,
+				isVisible: (options) => options.cameraModel !== 'CV605'
 			},
 			{
 				type: 'textinput',
@@ -814,6 +1126,7 @@ class mCamInstance extends InstanceBase {
 				label: 'User Name',
 				width: 6,
 				default: 'admin',
+				isVisible: (options) => options.cameraModel !== 'CV605'
 			},
 			{
 				type: 'textinput',
@@ -821,6 +1134,7 @@ class mCamInstance extends InstanceBase {
 				label: 'Password',
 				width: 6,
 				default: '9999',
+				isVisible: (options) => options.cameraModel !== 'CV605'
 			},
 		]
 	}

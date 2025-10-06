@@ -719,14 +719,33 @@ function getActions(inst) {
                 }
             ],
             callback: async (event) => {
-                if (event.options.direction == 'stop') {
-                    event.options.speed = 'focus'
+                // Handle CV605 VISCA commands
+                if (inst.config.cameraModel === 'CV605') {
+                    const speed = Math.min(event.options.speed, 8)
+                    const viscaSpeed = Math.floor(speed * 0x07 / 8) // Convert to VISCA speed (0x01-0x07)
+                    
+                    switch (event.options.direction) {
+                        case 'stop':
+                            await inst.makeRequest('ptzf', [['FocusStop']])
+                            break
+                        case 'far':
+                            await inst.makeRequest('ptzf', [['FocusFar', viscaSpeed]])
+                            break
+                        case 'near':
+                            await inst.makeRequest('ptzf', [['FocusNear', viscaSpeed]])
+                            break
+                    }
+                } else {
+                    // Original HTTP-based logic for other Marshall cameras
+                    if (event.options.direction == 'stop') {
+                        event.options.speed = 'focus'
+                    }
+                    else {
+                        event.options.speed -= 1
+                    }
+        
+                    inst.makeRequest('ptzf', [['Move', `${event.options.direction},${event.options.speed}`]])
                 }
-                else {
-                    event.options.speed -= 1
-                }
-    
-                inst.makeRequest('ptzf', [['Move', `${event.options.direction},${event.options.speed}`]])
             },
         },
         focus_ptz_assist: {
@@ -1192,17 +1211,58 @@ function getActions(inst) {
                 }
             ],
             callback: async (event) => {
-                if (event.options.direction == 'stop') {
-                    event.options.speed = 'motor'
+                // Handle CV605 VISCA commands
+                if (inst.config.cameraModel === 'CV605') {
+                    const speed = event.options.speed > 0 ? Math.min(event.options.speed, 24) : 24
+                    const viscaSpeed = Math.floor(speed * 0x18 / 24) // Convert to VISCA speed (0x01-0x18)
+                    
+                    switch (event.options.direction) {
+                        case 'stop':
+                            await inst.makeRequest('ptzf', [['PanTiltStop']])
+                            break
+                        case 'up':
+                            await inst.makeRequest('ptzf', [['PanTiltUp', viscaSpeed]])
+                            break
+                        case 'down':
+                            await inst.makeRequest('ptzf', [['PanTiltDown', viscaSpeed]])
+                            break
+                        case 'left':
+                            await inst.makeRequest('ptzf', [['PanTiltLeft', viscaSpeed]])
+                            break
+                        case 'right':
+                            await inst.makeRequest('ptzf', [['PanTiltRight', viscaSpeed]])
+                            break
+                        case 'up-left':
+                            await inst.makeRequest('ptzf', [['PanTiltUp', viscaSpeed]])
+                            await inst.makeRequest('ptzf', [['PanTiltLeft', viscaSpeed]])
+                            break
+                        case 'up-right':
+                            await inst.makeRequest('ptzf', [['PanTiltUp', viscaSpeed]])
+                            await inst.makeRequest('ptzf', [['PanTiltRight', viscaSpeed]])
+                            break
+                        case 'down-left':
+                            await inst.makeRequest('ptzf', [['PanTiltDown', viscaSpeed]])
+                            await inst.makeRequest('ptzf', [['PanTiltLeft', viscaSpeed]])
+                            break
+                        case 'down-right':
+                            await inst.makeRequest('ptzf', [['PanTiltDown', viscaSpeed]])
+                            await inst.makeRequest('ptzf', [['PanTiltRight', viscaSpeed]])
+                            break
+                    }
+                } else {
+                    // Original HTTP-based logic for other Marshall cameras
+                    if (event.options.direction == 'stop') {
+                        event.options.speed = 'motor'
+                    }
+                    else if (event.options.speed > 0) {
+                        event.options.speed -= 1
+                    }
+                    else {
+                        event.options.speed = inst.data.MotionSpeed-1
+                    }
+        
+                    inst.makeRequest('ptzf', [['Move', `${event.options.direction},${event.options.speed}`]])
                 }
-                else if (event.options.speed > 0) {
-                    event.options.speed -= 1
-                }
-                else {
-                    event.options.speed = inst.data.MotionSpeed-1
-                }
-    
-                inst.makeRequest('ptzf', [['Move', `${event.options.direction},${event.options.speed}`]])
             }
         },
         pt_limit: {
@@ -1343,7 +1403,29 @@ function getActions(inst) {
                 }
             ],
             callback: async (event) => {
-                inst.makeRequest('presetposition', [[(event.options.mode == 'selected') ? inst.data.selectedPresetAction : event.options.mode, event.options.value]])
+                // Handle CV605 VISCA commands
+                if (inst.config.cameraModel === 'CV605') {
+                    const mode = (event.options.mode == 'selected') ? inst.data.selectedPresetAction : event.options.mode
+                    const preset = event.options.value
+                    
+                    switch (mode) {
+                        case 'PresetCall':
+                            await inst.makeRequest('ptzf', [['PresetCall', preset]])
+                            break
+                        case 'PresetSet':
+                            await inst.makeRequest('ptzf', [['PresetSet', preset]])
+                            break
+                        case 'PresetClear':
+                            // VISCA doesn't have a clear preset command, so we'll just call the preset
+                            await inst.makeRequest('ptzf', [['PresetCall', preset]])
+                            break
+                        default:
+                            console.log('debug', 'Unknown preset action for CV605:', mode)
+                    }
+                } else {
+                    // Original HTTP-based logic for other Marshall cameras
+                    inst.makeRequest('presetposition', [[(event.options.mode == 'selected') ? inst.data.selectedPresetAction : event.options.mode, event.options.value]])
+                }
             },
         },
         presets_home_pos: {
@@ -1930,17 +2012,36 @@ function getActions(inst) {
                 }
             ],
             callback: async (event) => {
-                if (event.options.direction == 'stop') {
-                    event.options.speed = 'zoom'
+                // Handle CV605 VISCA commands
+                if (inst.config.cameraModel === 'CV605') {
+                    const speed = event.options.speed > 0 ? Math.min(event.options.speed, 8) : 8
+                    const viscaSpeed = Math.floor(speed * 0x07 / 8) // Convert to VISCA speed (0x01-0x07)
+                    
+                    switch (event.options.direction) {
+                        case 'stop':
+                            await inst.makeRequest('ptzf', [['ZoomStop']])
+                            break
+                        case 'tele':
+                            await inst.makeRequest('ptzf', [['ZoomIn', viscaSpeed]])
+                            break
+                        case 'wide':
+                            await inst.makeRequest('ptzf', [['ZoomOut', viscaSpeed]])
+                            break
+                    }
+                } else {
+                    // Original HTTP-based logic for other Marshall cameras
+                    if (event.options.direction == 'stop') {
+                        event.options.speed = 'zoom'
+                    }
+                    else if (event.options.speed > 0) {
+                        event.options.speed -= 1
+                    }
+                    else {
+                        event.options.speed = inst.data.ZoomSpeed-1
+                    }
+        
+                    inst.makeRequest('ptzf', [['Move', `${event.options.direction},${event.options.speed}`]])
                 }
-                else if (event.options.speed > 0) {
-                    event.options.speed -= 1
-                }
-                else {
-                    event.options.speed = inst.data.ZoomSpeed-1
-                }
-    
-                inst.makeRequest('ptzf', [['Move', `${event.options.direction},${event.options.speed}`]])
             }
         },
         zoom_speed: {
