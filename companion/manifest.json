@@ -1,8 +1,8 @@
 {
-	"id": "marshall-ipcamera",
-	"name": "marshall-ipcamera",
-	"shortname": "m-cam",
-	"description": "Control Marshall IP cameras",
+	"id": "marshall-ipcamera-cv605",
+	"name": "marshall-ipcamera-cv605",
+	"shortname": "m-cam-cv605",
+	"description": "Control Marshall IP cameras cv605",
 	"version": "1.0.0",
 	"license": "MIT",
 	"repository": "https://github.com/bitfocus/companion-module-marshall-ipcamera",
@@ -22,15 +22,9 @@
 	},
 	"manufacturer": "Marshall",
 	"products": [
-		"CV355",
-		"CV420",
-		"CV420e",
-		"CV620",
-		"CV630",
-		"CV730",
 		"CV605"
 	],
 	"keywords": [
-		"Marshall IP Camera"
+		"Marshall IP Camera - custom module"
 	]
 }
