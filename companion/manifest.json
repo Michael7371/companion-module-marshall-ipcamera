@@ -1,9 +1,9 @@
 {
-	"id": "marshall-ipcamera-cv605",
-	"name": "marshall-ipcamera-cv605",
-	"shortname": "m-cam-cv605",
-	"description": "Control Marshall IP cameras cv605",
-	"version": "1.0.0",
+	"id": "marshall-ipcamera",
+	"name": "marshall-ipcamera",
+	"shortname": "m-cam",
+	"description": "Control Marshall IP cameras including CV605 with VISCA over TCP",
+	"version": "1.0.2",
 	"license": "MIT",
 	"repository": "https://github.com/bitfocus/companion-module-marshall-ipcamera",
 	"bugs": "https://github.com/bitfocus/companion-module-marshall-ipcamera/issues",
@@ -17,14 +17,22 @@
 	"runtime": {
 		"type": "node18",
 		"api": "nodejs-ipc",
-		"apiVersion": "0.0.0",
+		"apiVersion": "1.0.0",
 		"entrypoint": "../index.js"
 	},
 	"manufacturer": "Marshall",
 	"products": [
+		"CV355",
+		"CV420",
+		"CV420e",
+		"CV620",
+		"CV630",
+		"CV730",
 		"CV605"
 	],
 	"keywords": [
-		"Marshall IP Camera - custom module"
+		"Marshall IP Camera",
+		"VISCA",
+		"TCP"
 	]
 }

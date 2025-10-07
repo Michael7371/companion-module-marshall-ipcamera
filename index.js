@@ -1084,7 +1084,7 @@ class mCamInstance extends InstanceBase {
 				id: 'info',
 				width: 12,
 				label: 'Information',
-				value: 'This module will connect to Marshall IP-Cameras',
+				value: 'This module supports Marshall IP cameras including CV605 with VISCA over TCP',
 			},
 			{
 				type: 'dropdown',
