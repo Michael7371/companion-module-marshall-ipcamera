@@ -720,7 +720,7 @@ function getActions(inst) {
             ],
             callback: async (event) => {
                 // Handle CV605 VISCA commands
-                if (inst.config.cameraModel === 'CV605') {
+                if (inst.isCV605) {
                     const speed = Math.min(event.options.speed, 8)
                     const viscaSpeed = Math.floor(speed * 0x07 / 8) // Convert to VISCA speed (0x01-0x07)
                     
@@ -1212,7 +1212,7 @@ function getActions(inst) {
             ],
             callback: async (event) => {
                 // Handle CV605 VISCA commands
-                if (inst.config.cameraModel === 'CV605') {
+                if (inst.isCV605) {
                     const speed = event.options.speed > 0 ? Math.min(event.options.speed, 24) : 24
                     const viscaSpeed = Math.floor(speed * 0x18 / 24) // Convert to VISCA speed (0x01-0x18)
                     
@@ -1404,7 +1404,7 @@ function getActions(inst) {
             ],
             callback: async (event) => {
                 // Handle CV605 VISCA commands
-                if (inst.config.cameraModel === 'CV605') {
+                if (inst.isCV605) {
                     const mode = (event.options.mode == 'selected') ? inst.data.selectedPresetAction : event.options.mode
                     const preset = event.options.value
                     
@@ -2013,7 +2013,7 @@ function getActions(inst) {
             ],
             callback: async (event) => {
                 // Handle CV605 VISCA commands
-                if (inst.config.cameraModel === 'CV605') {
+                if (inst.isCV605) {
                     const speed = event.options.speed > 0 ? Math.min(event.options.speed, 8) : 8
                     const viscaSpeed = Math.floor(speed * 0x07 / 8) // Convert to VISCA speed (0x01-0x07)
                     

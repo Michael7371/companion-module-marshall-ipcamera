@@ -239,9 +239,8 @@ class mCamInstance extends InstanceBase {
 		this.config = config
 		
 		console.log('debug', 'Config updated:', {
-			cameraModel: this.config.cameraModel,
 			host: this.config.host,
-			tcpPort: this.config.tcpPort
+			username: this.config.username
 		})
 		
 		this.initActions()
@@ -251,19 +250,10 @@ class mCamInstance extends InstanceBase {
 
 		console.log('debug', 'Try to connect...')
 		
-		// Check if this is a CV605 camera (use TCP/VISCA)
-		if (this.config.cameraModel === 'CV605') {
-			console.log('debug', 'Using TCP/VISCA connection for CV605')
-			this.connTimer = setInterval(() => {
-				this.init_tcp_connection()
-			}, 1000)
-		} else {
-			console.log('debug', 'Using HTTP connection for Marshall camera')
-			// Use existing HTTP connection for other Marshall cameras
-			this.connTimer = setInterval(() => {
-				this.init_api()
-			}, 1000)
-		}
+		// Try TCP connection first (for CV605), then fall back to HTTP
+		this.connTimer = setInterval(() => {
+			this.init_tcp_connection()
+		}, 1000)
 	}
 
 	async init_api() {
@@ -290,7 +280,17 @@ class mCamInstance extends InstanceBase {
 			return
 		}
 
-		console.log('debug', `Attempting TCP connection to ${this.config.host}:${this.config.tcpPort || 1259}`)
+		// If we've already tried TCP and failed, try HTTP instead
+		if (this.tcpConnectionAttempted) {
+			console.log('debug', 'TCP failed, trying HTTP connection')
+			this.connTimer = setInterval(() => {
+				this.init_api()
+			}, 1000)
+			return
+		}
+
+		this.tcpConnectionAttempted = true
+		console.log('debug', `Attempting TCP connection to ${this.config.host}:1259`)
 
 		try {
 			this.tcpSocket = new net.Socket()
@@ -298,6 +298,7 @@ class mCamInstance extends InstanceBase {
 			this.tcpSocket.on('connect', () => {
 				console.log('debug', 'TCP connection to CV605 established')
 				this.tcpConnected = true
+				this.isCV605 = true
 				if (this.connTimer !== undefined) {
 					clearInterval(this.connTimer)
 					delete this.connTimer
@@ -311,9 +312,10 @@ class mCamInstance extends InstanceBase {
 			})
 
 			this.tcpSocket.on('error', (err) => {
-				console.log('error', 'TCP connection error:', err.message)
+				console.log('debug', 'TCP connection failed, will try HTTP:', err.message)
 				this.tcpConnected = false
-				this.updateStatus('connection_error')
+				this.tcpConnectionAttempted = true
+				// Don't update status here, let it try HTTP
 			})
 
 			this.tcpSocket.on('close', () => {
@@ -323,17 +325,17 @@ class mCamInstance extends InstanceBase {
 			})
 
 			// Connect to CV605 on port 1259
-			this.tcpSocket.connect(this.config.tcpPort || 1259, this.config.host)
+			this.tcpSocket.connect(1259, this.config.host)
 			
 		} catch (err) {
-			console.log('error', 'Failed to create TCP connection:', err.message)
-			this.updateStatus('connection_error')
+			console.log('debug', 'Failed to create TCP connection, will try HTTP:', err.message)
+			this.tcpConnectionAttempted = true
 		}
 	}
 
 	initCommunication() {
 		if (this.communicationInitiated !== true) {
-			if (this.config.cameraModel === 'CV605') {
+			if (this.isCV605) {
 				// For CV605, we don't need polling as VISCA is command-based
 				this.updateStatus('ok')
 			} else {
@@ -977,7 +979,7 @@ class mCamInstance extends InstanceBase {
 	// Modified makeRequest to handle both HTTP and VISCA
 	async makeRequest(endpoint, parameters = []) {
 		// If this is a CV605 camera, use VISCA commands
-		if (this.config.cameraModel === 'CV605') {
+		if (this.isCV605) {
 			return this.handleViscaRequest(endpoint, parameters)
 		}
 		
@@ -1084,23 +1086,7 @@ class mCamInstance extends InstanceBase {
 				id: 'info',
 				width: 12,
 				label: 'Information',
-				value: 'This module supports Marshall IP cameras including CV605 with VISCA over TCP',
-			},
-			{
-				type: 'dropdown',
-				id: 'cameraModel',
-				label: 'Camera Model',
-				width: 6,
-				default: 'CV730',
-				choices: [
-					{ id: 'CV355', label: 'CV355' },
-					{ id: 'CV420', label: 'CV420' },
-					{ id: 'CV420e', label: 'CV420e' },
-					{ id: 'CV620', label: 'CV620' },
-					{ id: 'CV630', label: 'CV630' },
-					{ id: 'CV730', label: 'CV730' },
-					{ id: 'CV605', label: 'CV605 (VISCA over TCP)' }
-				]
+				value: 'This module will connect to Marshall IP-Cameras',
 			},
 			{
 				type: 'textinput',
@@ -1112,35 +1098,26 @@ class mCamInstance extends InstanceBase {
 			},
 			{
 				type: 'number',
-				id: 'tcpPort',
-				label: 'TCP Port (for CV605)',
-				width: 3,
-				default: 1259,
-				min: 1,
-				max: 65535
-			},
-			{
-				type: 'number',
 				id: 'pollInterval',
 				label: 'Polling Interval (ms), set to 0 to disable polling',
 				min: 50,
 				max: 1000,
 				default: 200,
-				width: 3
+				width: 3,
 			},
 			{
 				type: 'textinput',
 				id: 'username',
 				label: 'User Name',
 				width: 6,
-				default: 'admin'
+				default: 'admin',
 			},
 			{
 				type: 'textinput',
 				id: 'password',
 				label: 'Password',
 				width: 6,
-				default: '9999'
+				default: '9999',
 			},
 		]
 	}
