@@ -226,34 +226,44 @@ class mCamInstance extends InstanceBase {
 	}
 
 	async init(config) {
-		this.updateStatus('connecting')
-		this.configUpdated(config)
+		try {
+			this.updateStatus('connecting')
+			this.configUpdated(config)
+		} catch (err) {
+			console.log('error', 'Module initialization failed:', err.message)
+			this.updateStatus('bad_config')
+		}
 	}
 
 	async configUpdated(config) {
-		// polling is running and polling has been de-selected by config change
-		if (this.pollTimer !== undefined) {
-			clearInterval(this.pollTimer)
-			delete this.pollTimer
-		}
-		this.config = config
-		
-		console.log('debug', 'Config updated:', {
-			host: this.config.host,
-			username: this.config.username
-		})
-		
-		this.initActions()
-		this.initFeedbacks()
-		this.initVariables()
-		this.initPresets()
+		try {
+			// polling is running and polling has been de-selected by config change
+			if (this.pollTimer !== undefined) {
+				clearInterval(this.pollTimer)
+				delete this.pollTimer
+			}
+			this.config = config
+			
+			console.log('debug', 'Config updated:', {
+				host: this.config.host,
+				username: this.config.username
+			})
+			
+			this.initActions()
+			this.initFeedbacks()
+			this.initVariables()
+			this.initPresets()
 
-		console.log('debug', 'Try to connect...')
-		
-		// Try TCP connection first (for CV605), then fall back to HTTP
-		this.connTimer = setInterval(() => {
-			this.init_tcp_connection()
-		}, 1000)
+			console.log('debug', 'Try to connect...')
+			
+			// Try TCP connection first (for CV605), then fall back to HTTP
+			this.connTimer = setInterval(() => {
+				this.init_tcp_connection()
+			}, 1000)
+		} catch (err) {
+			console.log('error', 'Config update failed:', err.message)
+			this.updateStatus('bad_config')
+		}
 	}
 
 	async init_api() {
@@ -1094,14 +1104,11 @@ class mCamInstance extends InstanceBase {
 				label: 'IP Address',
 				width: 6,
 				default: '',
-				regex: Regex.IP,
 			},
 			{
 				type: 'number',
 				id: 'pollInterval',
 				label: 'Polling Interval (ms), set to 0 to disable polling',
-				min: 50,
-				max: 1000,
 				default: 200,
 				width: 3,
 			},
