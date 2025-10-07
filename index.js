@@ -238,6 +238,12 @@ class mCamInstance extends InstanceBase {
 		}
 		this.config = config
 		
+		console.log('debug', 'Config updated:', {
+			cameraModel: this.config.cameraModel,
+			host: this.config.host,
+			tcpPort: this.config.tcpPort
+		})
+		
 		this.initActions()
 		this.initFeedbacks()
 		this.initVariables()
@@ -247,10 +253,12 @@ class mCamInstance extends InstanceBase {
 		
 		// Check if this is a CV605 camera (use TCP/VISCA)
 		if (this.config.cameraModel === 'CV605') {
+			console.log('debug', 'Using TCP/VISCA connection for CV605')
 			this.connTimer = setInterval(() => {
 				this.init_tcp_connection()
 			}, 1000)
 		} else {
+			console.log('debug', 'Using HTTP connection for Marshall camera')
 			// Use existing HTTP connection for other Marshall cameras
 			this.connTimer = setInterval(() => {
 				this.init_api()
@@ -281,6 +289,8 @@ class mCamInstance extends InstanceBase {
 		if (this.tcpConnected) {
 			return
 		}
+
+		console.log('debug', `Attempting TCP connection to ${this.config.host}:${this.config.tcpPort || 1259}`)
 
 		try {
 			this.tcpSocket = new net.Socket()
@@ -1107,8 +1117,7 @@ class mCamInstance extends InstanceBase {
 				width: 3,
 				default: 1259,
 				min: 1,
-				max: 65535,
-				isVisible: (options) => options.cameraModel === 'CV605'
+				max: 65535
 			},
 			{
 				type: 'number',
@@ -1117,24 +1126,21 @@ class mCamInstance extends InstanceBase {
 				min: 50,
 				max: 1000,
 				default: 200,
-				width: 3,
-				isVisible: (options) => options.cameraModel !== 'CV605'
+				width: 3
 			},
 			{
 				type: 'textinput',
 				id: 'username',
 				label: 'User Name',
 				width: 6,
-				default: 'admin',
-				isVisible: (options) => options.cameraModel !== 'CV605'
+				default: 'admin'
 			},
 			{
 				type: 'textinput',
 				id: 'password',
 				label: 'Password',
 				width: 6,
-				default: '9999',
-				isVisible: (options) => options.cameraModel !== 'CV605'
+				default: '9999'
 			},
 		]
 	}
